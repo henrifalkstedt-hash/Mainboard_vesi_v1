@@ -30,6 +30,7 @@ button:active{opacity:.8}
 .mini{height:auto;padding:4px 8px;font-size:12px;background:none;color:var(--blue)}
 .quick{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 .quick button{height:auto;padding:12px 0;background:#e8f1fc;color:#1565c0;display:grid;font-size:14px}
+@media (prefers-color-scheme:dark){.quick button{background:#1e3a5f;color:#93c5fd}}
 .pane{background:var(--soft);border-radius:12px;padding:10px}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .lab5{display:grid;grid-template-columns:repeat(5,1fr);text-align:center;margin-top:4px;gap:2px}
@@ -49,6 +50,7 @@ nav button span{font-size:18px}nav button.on{color:var(--blue)}
 <main>
 <header><h1 id="title">Päivän seuranta</h1><span class="sub" id="date"></span><span class="badge" id="saved"></span></header>
 
+<!-- Päänäkymä / Dashboard -->
 <div class="view on" id="v-dashboard">
  <section class="card">
   <div class="top">
@@ -58,6 +60,8 @@ nav button span{font-size:18px}nav button.on{color:var(--blue)}
   <div class="pane" style="display:grid;gap:10px">
    <div class="lbl" id="wgoalTop"></div>
    <div id="wtodayBar"></div>
+   <!-- Oma kenttä pylvään alla ja näppäinten välissä -->
+   <div class="pane" id="wtodayInfo" style="display:grid;gap:3px;text-align:center;background:var(--card);border:1px solid var(--line);"></div>
    <div class="lbl">Lisää juotu määrä:</div>
    <div class="quick">
     <button data-ml="150">1,5 dl</button>
@@ -77,6 +81,7 @@ nav button span{font-size:18px}nav button.on{color:var(--blue)}
  </section>
 </div>
 
+<!-- Tavoitteet-näkymä -->
 <div class="view" id="v-goals">
  <section class="card">
   <h2>💧 Vedenjuontitavoite</h2>
@@ -90,6 +95,7 @@ nav button span{font-size:18px}nav button.on{color:var(--blue)}
  </section>
 </div>
 
+<!-- Historia-näkymä -->
 <div class="view" id="v-history">
  <section class="card">
   <div class="top"><h2>📋 Tallennetut vesimerkinnät</h2></div>
@@ -101,6 +107,7 @@ nav button span{font-size:18px}nav button.on{color:var(--blue)}
  </section>
 </div>
 
+<!-- Asetukset ja varmuuskopiointi -->
 <div class="view" id="v-settings">
  <section class="card">
   <h2>💾 Automaattinen varmuuskopiointi laitteelle</h2>
@@ -258,12 +265,12 @@ async function idbGet() {
   } catch (e) { return null; }
 }
 
-function save() {
+function save(skipAutoBackup = false) {
   const j = JSON.stringify(S);
   try { localStorage.setItem(KEY, j); } catch (e) {}
   idbPut(JSON.parse(j));
   $("saved").textContent = "Tallennettu klo " + new Date().toLocaleTimeString("fi-FI", {hour: "2-digit", minute: "2-digit"});
-  checkDailyAutoBackup();
+  if (!skipAutoBackup) checkDailyAutoBackup();
 }
 
 function adopt(o) {
@@ -289,11 +296,12 @@ async function load() {
       if (s) o = JSON.parse(s);
     } catch (e) {}
   }
-  if (o) {
+  if (o && Object.keys(o.waterLogs || {}).length > 0) {
     adopt(o);
   } else {
-    S = blank();
-    save();
+    // Esiladataan demodata heti alussa, jotta kaaviot ja edistyminen näkyvät
+    seedTestData();
+    save(true);
   }
 }
 
@@ -326,6 +334,7 @@ function renderWater() {
   const sub = waterSubGoal(g);
   const fullMet = td >= g;
   const subMet = td >= sub.ml;
+  const pct = Math.min(100, Math.round((td / Math.max(g, 1)) * 100));
   const pctTxt = sub.pct % 1 === 0 ? `${sub.pct}` : n1(sub.pct);
   const goalLitersTxt = `${n1(g / 1000)} l`;
   const todayLitersTxt = `${n2(td / 1000)} l`;
@@ -335,9 +344,17 @@ function renderWater() {
     $("wgoalTop").textContent = `Päivän kokonaistavoite: ${goalLitersTxt}`;
   }
 
+  // Tekstikenttä suoraan päiväpylvään alla ja pikapainikkeiden yläpuolella
+  if ($("wtodayInfo")) {
+    const subColor = subMet ? "var(--ok)" : "var(--amber)";
+    $("wtodayInfo").innerHTML = `
+      <div style="font-size:15px;font-weight:800;color:var(--ink)">Edistyminen: ${todayLitersTxt} (${pct} %)</div>
+      <div style="font-size:12px;font-weight:700;color:${subColor}">Osatavoite (${sub.time}): ${subLitersTxt} (${pctTxt} %) ${subMet ? "✓" : ""}</div>
+    `;
+  }
+
   $("undo").classList.toggle("hide", !(lastAdd && lastAdd.ml > 0));
 
-  const pct = Math.min(100, Math.round((td / Math.max(g, 1)) * 100));
   const anim = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   if ($("wtodayBar")) {
@@ -413,8 +430,6 @@ function renderWater() {
       const tsy = TH - (sub.ml / tMax) * TH;
       ts += `<line x1="0" x2="${TW}" y1="${tsy}" y2="${tsy}" stroke="var(--amber)" stroke-width="2" stroke-dasharray="4 3"/>`;
     }
-    ts += `<text x="${TW / 2}" y="${TH / 2 - 4}" text-anchor="middle" style="font-size:16px;font-weight:900;fill:#ffffff;paint-order:stroke;stroke:rgba(15,23,42,0.65);stroke-width:3px">Edistyminen: ${todayLitersTxt} (${pct} %)</text>`;
-    ts += `<text x="${TW / 2}" y="${TH / 2 + 16}" text-anchor="middle" style="font-size:11px;font-weight:800;fill:#fde68a;paint-order:stroke;stroke:rgba(15,23,42,0.65);stroke-width:2.5px">Osatavoite (${sub.time}): ${subLitersTxt} (${pctTxt} %)</text>`;
     ts += `</g>`;
     $("wtodayBar").innerHTML = `<svg viewBox="0 0 ${TW} ${TH}" style="border-radius:14px">${ts}</svg>`;
   }
@@ -680,7 +695,7 @@ $("imp").onchange = e => {
 };
 $("demo").onclick = () => {
   seedTestData();
-  save();
+  save(true);
   renderAll();
   toast("Esimerkkidata ladattu");
 };
@@ -690,7 +705,7 @@ $("yes").onclick = () => {
   $("confirm").style.display = "none";
   lastAdd = null;
   S = blank();
-  save();
+  save(true);
   renderAll();
   toast("Kaikki tiedot tyhjennetty");
 };
@@ -704,10 +719,8 @@ document.addEventListener("visibilitychange", () => {
 
 load().then(() => {
   renderAll();
-  checkDailyAutoBackup();
   scheduleNextMidnightBackup();
   setInterval(() => {
-    checkDailyAutoBackup();
     if (tab === "dashboard") renderAll();
   }, 30000);
 });
